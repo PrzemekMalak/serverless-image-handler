@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 const ThumborMapping = require('./thumbor-mapping');
+const rp = require('request-promise-native');
 
 class ImageRequest {
     constructor(s3, secretsManager) {
@@ -60,7 +61,7 @@ class ImageRequest {
             this.bucket = this.parseImageBucket(event, this.requestType);
             this.key = this.parseImageKey(event, this.requestType);
             this.edits = this.parseImageEdits(event, this.requestType);
-            this.originalImage = await this.getOriginalImage(this.bucket, this.key);
+            this.originalImage = await this.getOriginalImage(this.bucket, this.key, false);
             this.headers = this.parseImageHeaders(event, this.requestType);
 
             if (!this.headers) {
@@ -118,9 +119,10 @@ class ImageRequest {
      * Gets the original image from an Amazon S3 bucket.
      * @param {string} bucket - The name of the bucket containing the image.
      * @param {string} key - The key name corresponding to the image.
+     * @param {boolean} skipFallback - Skips fallback of getting image from different server 
      * @return {Promise} - The original image or an error.
      */
-    async getOriginalImage(bucket, key) {
+    async getOriginalImage(bucket, key, skipFallback) {
         const imageLocation = { Bucket: bucket, Key: key };
         try {
             const originalImage = await this.s3.getObject(imageLocation).promise();
@@ -150,15 +152,78 @@ class ImageRequest {
             } else {
                 this.CacheControl = "max-age=31536000,public";
             }
+            
+            if (!skipFallback)
+                console.log('Got original image from S3.');
+            
             return originalImage.Body;
-        } catch(err) {
+        } catch(err_) {
+            if (!skipFallback) {
+                try {            
+                    // Handle fallback
+                
+                    // 1. Download image from some ENV+path
+                    // 2. Upload it to S3
+                    await this.handleFallbackImage(bucket, key);
+                    
+                    // 3. Retry
+                    return await this.getOriginalImage(bucket, key, true);
+                } catch (err) {
+                    console.log(err);
+                    
+                    throw {
+                        status: ('NoSuchKey' === err.code) ? 404 : 500,
+                        code: err.code,
+                        message: err.message
+                    };
+                }
+            } else {
+                throw {
+                    status: ('NoSuchKey' === err_.code) ? 404 : 500,
+                    code: err_.code,
+                    message: err_.message
+                };
+            }
+        }
+    }
+    
+    /**
+     * Handles fallback of getting image from third-party server and uploading it to an Amazon S3 bucket.
+     * @param {string} bucket - The name of the bucket containing the image.
+     * @param {string} key - The key name corresponding to the image.
+     * @return {Promise} - The original image or an error.
+     */
+    async handleFallbackImage(bucket, key) {
+        var options = {
+            uri: (process.env.FALLBACK_ROOT || 'https://img2018.media.szybko.pl/') + key,
+            encoding: null
+        };
+        
+        console.log(key + ' not found on S3, using fallback of ' + options.uri);
+
+        try {
+            const body = await rp(options).promise();
+            
+            const imageBuffer = Buffer.from(body);
+            
+            const contentType = this.inferImageType(imageBuffer);
+                    
+            const o = { Body: body, Key: key, Bucket: bucket, ContentType: contentType };
+            
+            const originalImage = await this.s3.putObject(o).promise();
+            
+            return originalImage;
+        } catch (err) {
+            console.log(err);
+            
             throw {
-                status: ('NoSuchKey' === err.code) ? 404 : 500,
+                status: 500,
                 code: err.code,
                 message: err.message
             };
         }
     }
+
 
     /**
      * Parses the name of the appropriate Amazon S3 bucket to source the
@@ -397,23 +462,23 @@ class ImageRequest {
     * Return the output format depending on first four hex values of an image file.
     * @param {Buffer} imageBuffer - Image buffer.
     */
-   inferImageType(imageBuffer) {
-    switch(imageBuffer.toString('hex').substring(0,8).toUpperCase()) {
-        case '89504E47': return 'image/png';
-        case 'FFD8FFDB': return 'image/jpeg';
-        case 'FFD8FFE0': return 'image/jpeg';
-        case 'FFD8FFEE': return 'image/jpeg';
-        case 'FFD8FFE1': return 'image/jpeg';
-        case '52494646': return 'image/webp';
-        case '49492A00': return 'image/tiff';
-        case '4D4D002A': return 'image/tiff';
-        default: throw {
-            status: 500,
-            code: 'RequestTypeError',
-            message: 'The file does not have an extension and the file type could not be inferred. Please ensure that your original image is of a supported file type (jpg, png, tiff, webp, svg). Refer to the documentation for additional guidance on forming image requests.'
-        };   
+    inferImageType(imageBuffer) {
+        switch(imageBuffer.toString('hex').substring(0,8).toUpperCase()) {
+            case '89504E47': return 'image/png';
+            case 'FFD8FFDB': return 'image/jpeg';
+            case 'FFD8FFE0': return 'image/jpeg';
+            case 'FFD8FFEE': return 'image/jpeg';
+            case 'FFD8FFE1': return 'image/jpeg';
+            case '52494646': return 'image/webp';
+            case '49492A00': return 'image/tiff';
+            case '4D4D002A': return 'image/tiff';
+            default: throw {
+                status: 500,
+                code: 'RequestTypeError',
+                message: 'The file does not have an extension and the file type could not be inferred. Please ensure that your original image is of a supported file type (jpg, png, tiff, webp, svg). Refer to the documentation for additional guidance on forming image requests.'
+            };   
+        }
     }
-}
 }
 
 // Exports
