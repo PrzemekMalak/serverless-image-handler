@@ -194,8 +194,10 @@ class ImageRequest {
      * @return {Promise} - The original image or an error.
      */
     async handleFallbackImage(bucket, key) {
-        var options = {
-            uri: (process.env.FALLBACK_ROOT || 'https://img2018.media.szybko.pl/') + key,
+        const keyEncoded = encodeURI(key); // This fixes strange characters in file name
+        
+        const options = {
+            uri: (process.env.FALLBACK_ROOT || 'https://img2018.media.szybko.pl/') + keyEncoded,
             encoding: null
         };
         
@@ -208,7 +210,7 @@ class ImageRequest {
             
             const contentType = this.inferImageType(imageBuffer);
                     
-            const o = { Body: body, Key: key, Bucket: bucket, ContentType: contentType };
+            const o = { Body: body, Key: keyEncoded, Bucket: bucket, ContentType: contentType };
             
             const originalImage = await this.s3.putObject(o).promise();
             
