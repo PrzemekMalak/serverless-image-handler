@@ -123,6 +123,13 @@ class ImageRequest {
      * @return {Promise} - The original image or an error.
      */
     async getOriginalImage(bucket, key, skipFallback) {
+        if (key.indexOf('photo/') === -1)
+            throw {
+                status: 200,
+                code: 'InvalidPath',
+                message: 'Path does not contain photo/'
+            };
+
         const imageLocation = { Bucket: bucket, Key: key };
         try {
             const originalImage = await this.s3.getObject(imageLocation).promise();
