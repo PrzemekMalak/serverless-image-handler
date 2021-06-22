@@ -9,9 +9,14 @@ const parameterStore = new AWS.SSM();
 const ImageRequest = require('./image-request.js');
 const ImageHandler = require('./image-handler.js');
 
+var secretKey; // This is loaded once per lambda context and only if needed
+
 exports.handler = async (event) => {
     console.log(event);
-    const imageRequest = new ImageRequest(s3, parameterStore);
+    
+    await ensureSecretKeyLoaded();
+    
+    const imageRequest = new ImageRequest(s3, this.secretKey);
     const imageHandler = new ImageHandler(s3, rekognition);
     const isAlb = event.requestContext && event.requestContext.hasOwnProperty('elb');
 
@@ -109,4 +114,22 @@ const getResponseHeaders = (isErr = false, isAlb = false) => {
         headers["Content-Type"] = "application/json"
     }
     return headers;
+}
+
+/**
+ * Loads secret key from Parameter Store only once and only when needed (signature is enabled)
+ */
+const ensureSecretKeyLoaded = async () => {
+    if (!!this.secretKey) return;
+    
+    if (process.env.ENABLE_SIGNATURE !== 'Yes') return;
+    
+    try {
+        const response = await parameterStore.getParameter({ Name: process.env.PS_PARAMETER_NAME, WithDecryption: true }).promise();
+        const parameterValue = JSON.parse(response.Parameter.Value);
+        this.secretKey = parameterValue[process.env.SECRET_KEY];
+    } catch (err) {
+        console.log(err);
+        throw err;
+    }
 }
