@@ -5,9 +5,9 @@ const ThumborMapping = require('./thumbor-mapping');
 const rp = require('request-promise-native');
 
 class ImageRequest {
-    constructor(s3, secretsManager) {
+    constructor(s3, parameterStore) {
         this.s3 = s3;
-        this.secretsManager = secretsManager;
+        this.parameterStore = parameterStore;
     }
 
     /**
@@ -31,8 +31,8 @@ class ImageRequest {
 
                 const { signature } = queryStringParameters;
                 try {
-                    const response = await this.secretsManager.getSecretValue({ SecretId: process.env.SECRETS_MANAGER }).promise();
-                    const secretString = JSON.parse(response.SecretString);
+                    const response = await this.parameterStore.getParameter({ Name: process.env.PS_PARAMETER_NAME, WithDecryption: true }).promise();
+                    const secretString = JSON.parse(response.Parameter.Value);
                     const hash = crypto.createHmac('sha256', secretString[process.env.SECRET_KEY]).update(path).digest('hex');
 
                     // Signature should be made with the full path.
