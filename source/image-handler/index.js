@@ -126,8 +126,7 @@ const ensureSecretKeyLoaded = async () => {
     
     try {
         const response = await parameterStore.getParameter({ Name: process.env.PS_PARAMETER_NAME, WithDecryption: true }).promise();
-        const parameterValue = JSON.parse(response.Parameter.Value);
-        this.secretKey = parameterValue[process.env.SECRET_KEY];
+        this.secretKey = response.Parameter.Value;
     } catch (err) {
         console.log(err);
         throw err;
